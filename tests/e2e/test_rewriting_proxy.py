@@ -7,7 +7,6 @@ were served correctly.
 from __future__ import print_function
 from enum import Enum
 from selenium import webdriver
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import pytest
 import requests
 import sys
@@ -19,12 +18,32 @@ from pywb.webapp.pywb_init import create_wb_router
 from wsgiref.simple_server import make_server
 
 
-class Browsers(Enum):
-    Firefox = 1
-    Chrome = 2
+class Browsers:
+    # Local browsers
+    FIREFOX = 'local/firefox'
+    CHROME = 'local/chrome'
+
+    # Sauce Labs Desktop browsers
+    SAUCE_CHROME = 'sauce/chrome'
+    SAUCE_FIREFOX = 'sauce/firefox'
+    SAUCE_SAFARI = 'sauce/safari'
+
+    # Sauce Labs Windows Desktop browsers
+    # (FIXME - Not currently working as they do
+    #  not support loggingPrefs)
+    SAUCE_IE = 'sauce/ie'
+    SAUCE_EDGE = 'sauce/edge'
+
+    # Sauce Labs mobile browsers
+    # (FIXME - Not currently working)
+    SAUCE_IPHONE = 'sauce/iphone'
+    SAUCE_ANDROID = 'sauce/android'
 
 
-PROXY_PORT = 8091
+# TODO - Read these from a config file
+PROXY_PORT = 8090
+SAUCE_USERNAME = '<insert username>'
+SAUCE_ACCESS_KEY = '<insert access key>'
 
 
 class RewritingProxyServer:
@@ -64,15 +83,48 @@ class Browser:
         self.proxy_url = proxy_url
 
         # enable browser logging so that we can capture JS
-        # errors
+        # errors.
+        #
+        # FIXME - 'loggingPrefs' options are not currently
+        # supported for Internet Explorer or Edge
         caps = {'loggingPrefs' : {'browser':'ALL'}}
 
-        if browser == Browsers.Firefox:
-            caps.update(DesiredCapabilities.FIREFOX)
+        sauce_url = 'http://%s:%s@ondemand.saucelabs.com:80/wd/hub' % \
+          (SAUCE_USERNAME, SAUCE_ACCESS_KEY)
+
+        # see https://wiki.saucelabs.com/display/DOCS/Platform+Configurator
+        # for Sauce Labs WebDriver configuration settings for various
+        # platforms
+        def start_sauce_browser(platform_caps):
+            caps.update(platform_caps)
+            self.browser = webdriver.Remote(
+              desired_capabilities=caps,
+              command_executor=sauce_url
+            )
+
+        if browser == Browsers.FIREFOX:
+            caps.update({'browserName':'firefox'})
             self.browser = webdriver.Firefox(capabilities=caps)
-        elif browser == Browsers.Chrome:
-            caps.update(DesiredCapabilities.CHROME)
+        elif browser == Browsers.CHROME:
+            caps.update({'browserName':'chrome'})
             self.browser = webdriver.Chrome(desired_capabilities=caps)
+        elif browser == Browsers.SAUCE_SAFARI:
+            start_sauce_browser({
+                'browserName': 'safari',
+                'platform': 'OS X 10.11',
+            })
+        elif browser == Browsers.SAUCE_FIREFOX:
+            start_sauce_browser({'browserName':'firefox'})
+        elif browser == Browsers.SAUCE_CHROME:
+            start_sauce_browser({'browserName':'chrome'})
+        elif browser == Browsers.SAUCE_IE:
+            start_sauce_browser({'browserName':'internet explorer'})
+        elif browser == Browsers.SAUCE_EDGE:
+            start_sauce_browser({'browserName':'MicrosoftEdge'})
+        elif browser == Browsers.SAUCE_IPHONE:
+            start_sauce_browser({'browserName':'iPhone'})
+        elif browser == Browsers.SAUCE_ANDROID:
+            start_sauce_browser({'browserName':'android'})
         else:
             raise Exception('Unsupported browser')
 
@@ -105,14 +157,15 @@ def rewriting_proxy(request):
     return server
 
 
-@pytest.fixture(scope='module', params=[Browsers.Firefox, Browsers.Chrome])
+@pytest.fixture(scope='module', params=[Browsers.FIREFOX, Browsers.CHROME])
 def browser(request):
-    browser = Browser(request.param, 'http://localhost:%s/live' % PROXY_PORT)
+    proxy_server_url = 'http://localhost:%s/live' % PROXY_PORT
+    browser = Browser(request.param, proxy_server_url)
     request.addfinalizer(browser.close)
     return browser
 
 
-TEST_PAGES = ['http://example.com', 'https://github.com']
+TEST_PAGES = ['http://example.com', 'http://www.bbc.com/news/world-europe-34866820']
 
 
 @pytest.mark.parametrize('url', TEST_PAGES)
